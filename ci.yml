@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.10", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Syntax check
+      run: |
+        for f in signaldesk/engine.py signaldesk/parsers.py \
+                 signaldesk/reporter.py signaldesk/cli.py; do
+          python -m py_compile $f && echo "✅ $f OK"
+        done
+
+    - name: Verify zero dependencies
+      run: |
+        python -c "
+        import ast, sys
+        stdlib = {'re','csv','io','json','time','abc','uuid','logging','hashlib',
+                  'dataclasses','datetime','typing','enum','shutil','textwrap',
+                  'pathlib','argparse','collections','math','os','tempfile'}
+        for fname in ['signaldesk/engine.py','signaldesk/parsers.py',
+                      'signaldesk/reporter.py','signaldesk/cli.py']:
+            with open(fname) as f:
+                tree = ast.parse(f.read())
+            imports = [n.names[0].name.split('.')[0] for n in ast.walk(tree)
+                       if isinstance(n, ast.Import)]
+            imports += [n.module.split('.')[0] for n in ast.walk(tree)
+                        if isinstance(n, ast.ImportFrom) and n.module
+                        and not n.module.startswith('signaldesk')]
+            third = [i for i in imports if i not in stdlib and i != '__future__']
+            assert not third, f'{fname}: unexpected imports: {third}'
+        print('✅ Zero external dependencies confirmed')
+        "
+
+    - name: Run tests
+      run: python tests/test_signaldesk.py
+
+    - name: Demo — all output formats
+      run: |
+        python -m signaldesk --demo > /dev/null               && echo "✅ terminal OK"
+        python -m signaldesk --demo --format briefing > /dev/null  && echo "✅ briefing OK"
+        python -m signaldesk --demo --format json > /dev/null      && echo "✅ json OK"
+        python -m signaldesk --demo --format markdown > /dev/null  && echo "✅ markdown OK"
+
+    - name: Demo — all group modes
+      run: |
+        python -m signaldesk --demo --group priority > /dev/null && echo "✅ group:priority"
+        python -m signaldesk --demo --group type > /dev/null     && echo "✅ group:type"
+        python -m signaldesk --demo --group owner > /dev/null    && echo "✅ group:owner"
